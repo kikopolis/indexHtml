@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Registration</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-T3c6CoIi6uLrA9TneNEoa7RxnatzjcDSCmG1MXxSR1GAsXEV/Dwwykc2MPK8M2HN" crossorigin="anonymous">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+</head>
+<body>
+
+<div id="app">
+    <h1 class="mx-auto h1">Please enter your name and pick the Sectors you are currently involved in.</h1>
+
+    <form @submit.prevent="submit" class="mx-auto col-12 col-md-6 col-lg-4">
+        <div class="mb-3">
+            <label for="Name" class="form-label">Name:</label>
+            <input v-model="data.name" id="Name" name="name" type="text" class="form-control" required>
+        </div>
+        <div class="mb-3">
+            <label for="Sectors">Sectors:</label>
+            <select v-model="data.sectors" id="Sectors" name="sectors" multiple="multiple" size="5" class="form-control"
+                    required>
+                <option v-for="sector in sectors"
+                        :key="sector.id"
+                        :value="sector.id"
+                        :selected="isSectorSelected(sector.id)">
+                    {{ sector.name }}
+                </option>
+            </select>
+        </div>
+        <div class="mb-3">
+            <label for="AgreeTerms">Agree to terms</label>
+            <input v-model="data.agreedToTerms" id="AgreeTerms" type="checkbox" class="form-check-input mx-2" required>
+        </div>
+        <button type="submit" class="btn btn-primary mx-auto">Save</button>
+        <div v-if="showSuccess" class="my-3 alert alert-success" role="alert">
+            Saved successfully
+        </div>
+        <div v-if="showUserError" class="my-3 alert alert-danger" role="alert">
+            Please check your input and try again
+        </div>
+        <div v-if="showServerError" class="my-3 alert alert-danger" role="alert">
+            Something went wrong, please try again later
+        </div>
+    </form>
+</div>
+
+<script>
+    const {createApp, ref} = Vue
+
+    const RootComponent = {
+        setup() {
+            const showSuccess = ref(false);
+            const showUserError = ref(false);
+            const showServerError = ref(false);
+            const sectors = ref([]);
+            const data = ref({
+                name: '',
+                sectors: [],
+                agreedToTerms: false,
+            });
+            let timer = undefined;
+            const formatSectors = () => {
+                return data.value.sectors.map(sector => {
+                    return {
+                        id: sector,
+                    }
+                })
+            }
+            const canSubmit = () => {
+                if (data.value.name === '') {
+                    alert('Please enter your name')
+                    return false;
+                }
+                if (data.value.sectors.length === 0) {
+                    alert('Please select at least one sector')
+                    return false;
+                }
+                if (!data.value.agreedToTerms) {
+                    alert('Please agree to the terms')
+                    return false;
+                }
+                return true;
+            }
+            const isSectorSelected = (sectorId) => {
+                return data.value.sectors.includes(sectorId)
+            }
+            const submit = () => {
+                if (!canSubmit()) {
+                    return;
+                }
+                showSuccess.value = false;
+                showUserError.value = false;
+                showServerError.value = false;
+                data.value.sectors = formatSectors();
+                fetch('/api/persons', {
+                    method: 'POST',
+                    body: JSON.stringify(data.value),
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-TOKEN': window.sessionStorage.getItem('token'),
+                    }
+                })
+                    .then(response => response.json())
+                    .then(person => {
+                        data.value.name = person.name
+                        data.value.sectors = person.sectors.map(sector => sector.id)
+                        data.value.agreedToTerms = person.agreedToTerms
+                        showSuccess.value = true;
+                        clearFeedback();
+                    })
+                    .catch(error => {
+                        if (error.status === 400) {
+                            showUserError.value = true;
+                            clearFeedback();
+                        }
+                        if (error.status === 500) {
+                            showServerError.value = true;
+                            clearFeedback();
+                        }
+                    })
+            }
+            const clearFeedback = () => {
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                timer = setTimeout(() => {
+                    showSuccess.value = false;
+                    showUserError.value = false;
+                    showServerError.value = false;
+                }, 10000)
+            }
+
+            return {
+                showSuccess,
+                showUserError,
+                showServerError,
+                sectors,
+                data,
+                canSubmit,
+                isSectorSelected,
+                submit
+            }
+        },
+        beforeMount() {
+            fetch('/api/sectors')
+                .then(response => response.json())
+                .then(data => {
+                    this.sectors = data
+                })
+            if (window.sessionStorage.getItem('token') && window.sessionStorage.getItem('tokenExpiration') > Date.now()) {
+                fetch('/api/persons',
+                    {
+                        headers: {
+                            'X-TOKEN': window.sessionStorage.getItem('token'),
+                        }
+                    })
+                    .then(response => response.json())
+                    .then(person => {
+                        this.data.name = person.name;
+                        this.data.sectors = person.sectors.map(sector => sector.id);
+                        this.data.agreedToTerms = person.agreedToTerms;
+                    })
+            } else {
+                fetch('/api/tokens')
+                    .then(response => response.json())
+                    .then(data => {
+                        const now = Date.now();
+                        window.sessionStorage.setItem('token', data.token);
+                        window.sessionStorage.setItem('tokenExpiration', now + 5 * 60 * 1000);
+                    })
+            }
+        },
+    }
+    createApp(RootComponent).mount('#app')
+    window.onbeforeunload = function () {
+        window.sessionStorage.removeItem('token')
+    }
+</script>
+</body>
+</html>
